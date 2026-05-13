@@ -1,0 +1,20 @@
+image:
+  registry: docker.io
+  name: persesdev/perses
+  version: "v0.53.1"
+
+replicas: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+config:
+  security:
+    readonly: false
+    enable_auth: false
+  database:
+    file:
+      folder: /perses
+      extension: json

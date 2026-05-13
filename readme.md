@@ -604,6 +604,14 @@ Perses validates dashboards against CUE schemas for each plugin. Common mistakes
   the schema. For throughput, use `"bytes/sec"` not `"bytes-per-sec"`.
 - **`seriesNameFormat` not allowed**: Loki query plugins (`LokiTimeSeriesQuery`,
   `LokiLogQuery`) do not support `seriesNameFormat` — only Prometheus queries do.
+- **"No datasource found for kind 'LokiDatasource' and name 'undefined'"**: When
+  using a non-default datasource (e.g. Loki alongside a default Prometheus), each
+  query must include an explicit `datasource` selector in its spec:
+  ```json
+  "datasource": { "kind": "LokiDatasource", "name": "loki" }
+  ```
+  Without this, Perses tries to resolve the default datasource (Prometheus) for
+  the query plugin kind and fails.
 
 You can inspect any plugin's CUE schema via:
 ```bash

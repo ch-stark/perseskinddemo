@@ -549,6 +549,10 @@
               "plugin": {
                 "kind": "LokiLogQuery",
                 "spec": {
+                  "datasource": {
+                    "kind": "LokiDatasource",
+                    "name": "loki"
+                  },
                   "query": "{namespace=~\"$namespace\", pod=~\"$pod\"}"
                 }
               }
@@ -573,6 +577,10 @@
               "plugin": {
                 "kind": "LokiTimeSeriesQuery",
                 "spec": {
+                  "datasource": {
+                    "kind": "LokiDatasource",
+                    "name": "loki"
+                  },
                   "query": "sum by (namespace) (rate({namespace=~\"$namespace\"}[5m]))"
                 }
               }
@@ -595,6 +603,10 @@
               "plugin": {
                 "kind": "LokiLogQuery",
                 "spec": {
+                  "datasource": {
+                    "kind": "LokiDatasource",
+                    "name": "loki"
+                  },
                   "query": "{namespace=~\"$namespace\", pod=~\"$pod\"} |~ \"(?i)(error|fatal|panic|exception)\""
                 }
               }

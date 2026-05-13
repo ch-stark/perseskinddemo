@@ -1,0 +1,336 @@
+  Deploy Perses on a Kind Cluster — Step by Step
+
+  Prerequisites
+
+  - docker installed and running
+  - kind CLI installed
+  - kubectl CLI installed
+  - helm CLI installed
+
+  ---
+  Step 1: Create a Kind Cluster
+
+  kind create cluster --name perses-lab
+
+  Verify:
+
+  kubectl cluster-info --context kind-perses-lab
+
+  ---
+  Step 2: Deploy Prometheus (the datasource backend)
+
+  Perses needs a Prometheus instance to query. Install it via the community Helm chart:
+
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  helm repo update
+
+  helm install prometheus prometheus-community/prometheus \
+    --namespace monitoring --create-namespace \
+    --set server.service.type=ClusterIP \
+    --set alertmanager.enabled=false \
+    --set kube-state-metrics.enabled=true \
+    --set prometheus-node-exporter.enabled=true \
+    --set prometheus-pushgateway.enabled=false
+
+  Wait for it to come up:
+
+  kubectl -n monitoring rollout status deploy/prometheus-server
+
+  The in-cluster URL will be: http://prometheus-server.monitoring.svc.cluster.local:80
+
+  ---
+  Step 3: Deploy Perses via Helm
+
+  helm repo add perses https://perses.github.io/helm-charts
+  helm repo update
+
+  Create a values file:
+
+  cat <<'EOF' > perses-values.yaml
+  image:
+    registry: docker.io
+    name: persesdev/perses
+    version: "v0.53.1"
+
+  replicas: 1
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+
+  config:
+    security:
+      readonly: false
+      enable_auth: false
+    database:
+      file:
+        folder: /perses
+        extension: json
+
+  # Provision a global Prometheus datasource at startup
+  datasources:
+    - kind: GlobalDatasource
+      metadata:
+        name: prometheus
+      spec:
+        default: true
+        plugin:
+          kind: PrometheusDatasource
+          spec:
+            directUrl: http://prometheus-server.monitoring.svc.cluster.local:80
+  EOF
+
+  Install:
+
+  helm install perses perses/perses \
+    --namespace perses --create-namespace \
+    -f perses-values.yaml
+
+  Wait for it:
+
+  kubectl -n perses rollout status deploy/perses
+
+  ---
+  Step 4: Access the Perses UI
+
+  Port-forward the Perses service to your local machine:
+
+  kubectl -n perses port-forward svc/perses 8080:8080 &
+
+  Open your browser at http://localhost:8080. You should see the Perses UI.
+
+  ---
+  Step 5: Verify the Global Datasource
+
+  The Helm chart provisioned the datasource automatically. Confirm via the API:
+
+  curl -s http://localhost:8080/api/v1/globaldatasources | python3 -m json.tool
+
+  You should see the prometheus GlobalDatasource with default: true.
+
+  You can also verify it in the UI: navigate to Admin > Global Datasources — the "prometheus" entry should appear.
+
+  ---
+  Step 6: Create a Project
+
+  Dashboards live inside projects. Create one:
+
+  curl -s -X POST http://localhost:8080/api/v1/projects \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "kind": "Project",
+      "metadata": {
+        "name": "my-project"
+      }
+    }' | python3 -m json.tool
+
+  ---
+  Step 7: Create a Dashboard
+  
+  Create a dashboard with three panels — a time-series chart, a stat, and a gauge:
+
+  curl -s -X POST http://localhost:8080/api/v1/projects/my-project/dashboards \
+    -H 'Content-Type: application/json' \
+    -d '{
+    "kind": "Dashboard",
+    "metadata": {
+      "name": "node-overview",
+      "project": "my-project"
+    },
+    "spec": {
+      "display": {
+        "name": "Node Overview"
+      },
+      "duration": "1h",
+      "refreshInterval": "30s",
+      "variables": [
+        {
+          "kind": "ListVariable",
+          "spec": {
+            "name": "instance",
+            "allowMultiple": false,
+            "allowAllValue": true,
+            "plugin": {
+              "kind": "PrometheusLabelValuesVariable",
+              "spec": {
+                "labelName": "instance",
+                "matchers": ["up"]
+              }
+            }
+          }
+        }
+      ],
+      "panels": {
+        "cpuUsage": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "CPU Usage Over Time"
+            },
+            "plugin": {
+              "kind": "TimeSeriesChart",
+              "spec": {
+                "legend": {
+                  "position": "bottom"
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "query": "1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\", instance=~\"$instance\"}[5m]))",
+                      "seriesNameFormat": "{{instance}}"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "memoryUsed": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Memory Used %"
+            },
+            "plugin": {
+              "kind": "StatChart",
+              "spec": {
+                "calculation": "last-number",
+                "format": {
+                  "unit": "percent"
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "query": "100 - ((node_memory_MemAvailable_bytes{instance=~\"$instance\"} * 100) / node_memory_MemTotal_bytes{instance=~\"$instance\"})"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "targetsUp": {
+          "kind": "Panel",
+          "spec": {
+            "display": {
+              "name": "Targets Up"
+            },
+            "plugin": {
+              "kind": "GaugeChart",
+              "spec": {
+                "calculation": "last-number",
+                "format": {
+                  "unit": "decimal"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"value": 1},
+                    {"value": 3}
+                  ]
+                }
+              }
+            },
+            "queries": [
+              {
+                "kind": "TimeSeriesQuery",
+                "spec": {
+                  "plugin": {
+                    "kind": "PrometheusTimeSeriesQuery",
+                    "spec": {
+                      "query": "count(up{instance=~\"$instance\"} == 1)"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "layouts": [
+        {
+          "kind": "Grid",
+          "spec": {
+            "display": {
+              "title": "Overview",
+              "collapse": {
+                "open": true
+              }
+            },
+            "items": [
+              {
+                "x": 0, "y": 0,
+                "width": 12, "height": 4,
+                "content": { "$ref": "#/spec/panels/memoryUsed" }
+              },
+              {
+                "x": 12, "y": 0,
+                "width": 12, "height": 4,
+                "content": { "$ref": "#/spec/panels/targetsUp" }
+              },
+              {
+                "x": 0, "y": 4,
+                "width": 24, "height": 8,
+                "content": { "$ref": "#/spec/panels/cpuUsage" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }' | python3 -m json.tool
+
+  Key detail on $ref paths: always use #/spec/panels/<name>, not #/spec/config/panels/<name>. Perses resolves refs relative to the dashboard config root.
+
+  ---
+  Step 8: View the Dashboard
+  
+  In your browser at http://localhost:8080, navigate to:
+
+  Projects > my-project > Dashboards > Node Overview
+
+  You should see:
+  - A stat panel showing memory usage percentage
+  - A gauge panel showing the count of healthy scrape targets
+  - A time-series chart showing CPU usage over time
+  - An instance variable dropdown at the top for filtering
+
+  ---
+  Cleanup
+
+  When you're done:
+
+  # Stop the port-forward
+  kill %1
+
+  # Delete the Kind cluster
+  kind delete cluster --name perses-lab
+
+  ---
+  Quick Reference
+
+  ┌─────────────────────┬─────────────────────────────────────────────────┐
+  │      Resource       │                  API Endpoint                   │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │ Global Datasources  │ GET/POST /api/v1/globaldatasources              │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │ Projects            │ GET/POST /api/v1/projects                       │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │ Dashboards          │ GET/POST /api/v1/projects/{project}/dashboards  │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │ Project Datasources │ GET/POST /api/v1/projects/{project}/datasources │
+  └─────────────────────┴─────────────────────────────────────────────────┘
+
+  Perses version used: v0.53.1 / Helm chart 0.21.0.

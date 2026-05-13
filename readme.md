@@ -396,6 +396,156 @@ You should see:
 
 ---
 
+## Step 10: Deploy Loki (Log Aggregation)
+
+Add a second datasource — Loki for log collection. Deploy it alongside Promtail
+using the `loki-stack` Helm chart:
+
+```bash
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+
+helm pull grafana/loki-stack --version 2.10.3 --untar --untardir /tmp/loki-chart
+
+helm install loki /tmp/loki-chart/loki-stack \
+  --namespace monitoring \
+  --set loki.persistence.enabled=false \
+  --set promtail.enabled=true \
+  --set grafana.enabled=false
+```
+
+Wait for it:
+
+```bash
+kubectl -n monitoring rollout status statefulset/loki --timeout=120s
+```
+
+> We use the same `helm pull` + local install pattern to avoid the Helm file size
+> limit issue.
+
+---
+
+## Step 11: Create a Loki Global Datasource
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/globaldatasources \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "kind": "GlobalDatasource",
+    "metadata": {
+      "name": "loki"
+    },
+    "spec": {
+      "default": false,
+      "plugin": {
+        "kind": "LokiDatasource",
+        "spec": {
+          "proxy": {
+            "kind": "HTTPProxy",
+            "spec": {
+              "url": "http://loki.monitoring.svc.cluster.local:3100"
+            }
+          }
+        }
+      }
+    }
+  }' | python3 -m json.tool
+```
+
+Verify the proxy works:
+
+```bash
+curl -s "http://localhost:8080/proxy/globaldatasources/loki/loki/api/v1/labels" \
+  | python3 -m json.tool
+```
+
+You should see labels like `namespace`, `pod`, `container`, etc.
+
+---
+
+## Step 12: Create an Advanced Multi-Datasource Dashboard
+
+This dashboard combines Prometheus metrics and Loki logs across 5 collapsible
+sections with 21 panels. It uses most of the panel types Perses supports:
+TimeSeriesChart, StatChart, GaugeChart, BarChart, PieChart, Table, Markdown,
+and LogsTable.
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/projects/my-project/dashboards \
+  -H 'Content-Type: application/json' \
+  -d @advanced-dashboard.json | python3 -m json.tool | head -20
+```
+
+> The full dashboard JSON is in `advanced-dashboard.json` in this repo.
+
+### Dashboard Sections
+
+| Section | Panels | Datasource |
+|---------|--------|------------|
+| **Info** | Markdown panel with dashboard overview | — |
+| **Cluster Overview** | Node count, pod count, pods running, container restarts (stat); CPU & memory usage (gauge) | Prometheus |
+| **Node Resources** | CPU & memory by node (time series); network I/O & disk I/O (time series); filesystem usage (bar chart) | Prometheus |
+| **Workloads** | Pods by namespace (pie chart); pod phases (bar chart); container restarts over time (time series); top CPU & memory pods (time series); deployment status (table) | Prometheus |
+| **Logs (Loki)** | Log rate by namespace (time series); pod logs (logs table); error logs filtered by regex (logs table) | Loki |
+
+### Plugin Schema Gotchas
+
+When building dashboards, be aware of schema validation differences between plugins:
+
+- **PieChart** requires a `radius` field (e.g. `"radius": 80`)
+- **Throughput units** use slash notation: `"bytes/sec"`, not `"bytes-per-sec"`.
+  Valid throughput units: `bits/sec`, `bytes/sec`, `decbytes/sec`, `counts/sec`,
+  `ops/sec`, `requests/sec`, `reads/sec`, `writes/sec`, etc.
+- **LokiTimeSeriesQuery** does NOT support `seriesNameFormat` — only `query` is
+  allowed in the spec. PrometheusTimeSeriesQuery does support it.
+- **LokiLogQuery** supports `query` and an optional `direction` (`"forward"` or
+  `"backward"`)
+
+### Available Panel Types (v0.53.1)
+
+| Panel Plugin | Use Case |
+|---|---|
+| `TimeSeriesChart` | Line/area charts over time |
+| `StatChart` | Single-value stat with optional sparkline |
+| `GaugeChart` | Gauge with thresholds |
+| `BarChart` | Horizontal/vertical bar chart |
+| `PieChart` | Pie/donut chart (requires `radius`) |
+| `Table` | Tabular data |
+| `TimeSeriesTable` | Time-series as table |
+| `HeatMapChart` | Heat map |
+| `HistogramChart` | Histogram distribution |
+| `ScatterChart` | Scatter plot |
+| `StatusHistoryChart` | Status over time |
+| `Markdown` | Static text/documentation |
+| `LogsTable` | Log lines (for Loki/VictoriaLogs) |
+| `TracingGanttChart` | Trace spans (for Tempo) |
+| `TraceTable` | Trace list |
+| `FlameChart` | Flame graph (for Pyroscope) |
+
+### Available Datasource Plugins
+
+| Datasource Plugin | Query Types |
+|---|---|
+| `PrometheusDatasource` | `PrometheusTimeSeriesQuery` |
+| `LokiDatasource` | `LokiTimeSeriesQuery`, `LokiLogQuery` |
+| `TempoDatasource` | `TempoTraceQuery` |
+| `PyroscopeDatasource` | `PyroscopeProfileQuery` |
+| `VictoriaLogsDatasource` | `VictoriaLogsTimeSeriesQuery`, `VictoriaLogsLogQuery` |
+| `ClickHouseDatasource` | `ClickHouseTimeSeriesQuery`, `ClickHouseLogQuery` |
+
+---
+
+## Step 13: View the Advanced Dashboard
+
+In your browser, navigate to:
+
+**Projects > my-project > Dashboards > Kubernetes Cluster Monitoring**
+
+Use the **namespace** and **pod** dropdowns at the top to filter. Each section is
+collapsible — click the section header to expand or collapse.
+
+---
+
 ## Cleanup
 
 ```bash
@@ -405,8 +555,8 @@ kill %1
 # Delete the Kind cluster
 kind delete cluster --name perses-lab
 
-# Remove the local chart
-rm -rf /tmp/perses-chart
+# Remove local charts
+rm -rf /tmp/perses-chart /tmp/loki-chart
 ```
 
 ---
@@ -444,6 +594,22 @@ Prometheus URL directly. In-cluster URLs like
 `http://prometheus-server.monitoring.svc.cluster.local` are not reachable from your
 laptop. Switch to `proxy` mode so queries go through the Perses server. See Step 6.
 
+### Dashboard creation fails with schema validation errors
+
+Perses validates dashboards against CUE schemas for each plugin. Common mistakes:
+
+- **PieChart missing `radius`**: `"spec.radius: incomplete value number"` — add
+  `"radius": 80` to the PieChart spec.
+- **Invalid format unit**: `"conflicting values"` — use the exact unit string from
+  the schema. For throughput, use `"bytes/sec"` not `"bytes-per-sec"`.
+- **`seriesNameFormat` not allowed**: Loki query plugins (`LokiTimeSeriesQuery`,
+  `LokiLogQuery`) do not support `seriesNameFormat` — only Prometheus queries do.
+
+You can inspect any plugin's CUE schema via:
+```bash
+curl http://localhost:8080/plugins/<PluginModule>/schemas/<schema-file>.cue
+```
+
 ---
 
-Perses version: **v0.53.1** | Helm chart: **0.21.0**
+Perses version: **v0.53.1** | Helm chart: **0.21.0** | Loki stack: **2.10.3**

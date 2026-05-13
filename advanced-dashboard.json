@@ -1,0 +1,672 @@
+{
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "kubernetes-cluster-monitoring",
+    "project": "my-project"
+  },
+  "spec": {
+    "display": {
+      "name": "Kubernetes Cluster Monitoring"
+    },
+    "duration": "1h",
+    "refreshInterval": "30s",
+    "variables": [
+      {
+        "kind": "ListVariable",
+        "spec": {
+          "name": "namespace",
+          "allowMultiple": false,
+          "allowAllValue": true,
+          "plugin": {
+            "kind": "PrometheusLabelValuesVariable",
+            "spec": {
+              "labelName": "namespace",
+              "matchers": ["kube_pod_info"]
+            }
+          }
+        }
+      },
+      {
+        "kind": "ListVariable",
+        "spec": {
+          "name": "pod",
+          "allowMultiple": false,
+          "allowAllValue": true,
+          "plugin": {
+            "kind": "PrometheusLabelValuesVariable",
+            "spec": {
+              "labelName": "pod",
+              "matchers": ["kube_pod_info{namespace=~\"$namespace\"}"]
+            }
+          }
+        }
+      }
+    ],
+    "panels": {
+
+      "nodeCount": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Nodes" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last-number",
+              "format": { "unit": "decimal" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": { "query": "count(kube_node_info)" }
+              }
+            }
+          }]
+        }
+      },
+
+      "podTotal": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Total Pods" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last-number",
+              "format": { "unit": "decimal" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": { "query": "count(kube_pod_info{namespace=~\"$namespace\"})" }
+              }
+            }
+          }]
+        }
+      },
+
+      "podRunning": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Pods Running" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last-number",
+              "format": { "unit": "decimal" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": { "query": "count(kube_pod_status_phase{phase=\"Running\", namespace=~\"$namespace\"} == 1)" }
+              }
+            }
+          }]
+        }
+      },
+
+      "podRestarts": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Container Restarts (1h)" },
+          "plugin": {
+            "kind": "StatChart",
+            "spec": {
+              "calculation": "last-number",
+              "format": { "unit": "decimal" },
+              "sparkline": { "width": 1.5 }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": { "query": "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}[1h]))" }
+              }
+            }
+          }]
+        }
+      },
+
+      "clusterCpu": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Cluster CPU Usage" },
+          "plugin": {
+            "kind": "GaugeChart",
+            "spec": {
+              "calculation": "last-number",
+              "format": { "unit": "percent" },
+              "thresholds": {
+                "steps": [
+                  { "value": 70 },
+                  { "value": 90 }
+                ]
+              }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": { "query": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))" }
+              }
+            }
+          }]
+        }
+      },
+
+      "clusterMemory": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Cluster Memory Usage" },
+          "plugin": {
+            "kind": "GaugeChart",
+            "spec": {
+              "calculation": "last-number",
+              "format": { "unit": "percent" },
+              "thresholds": {
+                "steps": [
+                  { "value": 70 },
+                  { "value": 90 }
+                ]
+              }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": { "query": "100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))" }
+              }
+            }
+          }]
+        }
+      },
+
+      "cpuByNode": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "CPU Usage by Node" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": { "format": { "unit": "percent" } },
+              "legend": { "position": "bottom" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+                  "seriesNameFormat": "{{instance}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "memoryByNode": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Memory Usage by Node" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": { "format": { "unit": "bytes" } },
+              "legend": { "position": "bottom" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes",
+                  "seriesNameFormat": "Used - {{instance}}"
+                }
+              }
+            }
+          }, {
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "node_memory_MemTotal_bytes",
+                  "seriesNameFormat": "Total - {{instance}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "networkTraffic": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Network I/O" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": { "format": { "unit": "bytes/sec" } },
+              "legend": { "position": "bottom" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "sum by (instance) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|cali.*|flannel.*\"}[5m]))",
+                  "seriesNameFormat": "Receive - {{instance}}"
+                }
+              }
+            }
+          }, {
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "-sum by (instance) (rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|cali.*|flannel.*\"}[5m]))",
+                  "seriesNameFormat": "Transmit - {{instance}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "diskIO": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Disk I/O" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": { "format": { "unit": "bytes/sec" } },
+              "legend": { "position": "bottom" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "sum by (instance) (rate(node_disk_read_bytes_total[5m]))",
+                  "seriesNameFormat": "Read - {{instance}}"
+                }
+              }
+            }
+          }, {
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "-sum by (instance) (rate(node_disk_written_bytes_total[5m]))",
+                  "seriesNameFormat": "Write - {{instance}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "filesystemUsage": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Filesystem Usage" },
+          "plugin": {
+            "kind": "BarChart",
+            "spec": {
+              "calculation": "last-number",
+              "format": { "unit": "percent" },
+              "sort": "desc"
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "100 * (1 - node_filesystem_avail_bytes{fstype=~\"ext4|xfs\",mountpoint!~\".*pods.*\"} / node_filesystem_size_bytes{fstype=~\"ext4|xfs\",mountpoint!~\".*pods.*\"})",
+                  "seriesNameFormat": "{{mountpoint}} ({{instance}})"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "podsByNamespace": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Pods by Namespace" },
+          "plugin": {
+            "kind": "PieChart",
+            "spec": {
+              "calculation": "last-number",
+              "radius": 80
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "count by (namespace) (kube_pod_info{namespace=~\"$namespace\"})",
+                  "seriesNameFormat": "{{namespace}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "podPhases": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Pod Phases" },
+          "plugin": {
+            "kind": "BarChart",
+            "spec": {
+              "calculation": "last-number",
+              "format": { "unit": "decimal" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "sum by (phase) (kube_pod_status_phase{namespace=~\"$namespace\"} == 1)",
+                  "seriesNameFormat": "{{phase}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "topCpuPods": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Top CPU Pods" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": { "position": "bottom" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "topk(10, sum by (pod, namespace) (rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}[5m])))",
+                  "seriesNameFormat": "{{namespace}}/{{pod}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "topMemoryPods": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Top Memory Pods" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": { "format": { "unit": "bytes" } },
+              "legend": { "position": "bottom" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "topk(10, sum by (pod, namespace) (container_memory_working_set_bytes{namespace=~\"$namespace\", pod=~\"$pod\", container!=\"\", container!=\"POD\"}))",
+                  "seriesNameFormat": "{{namespace}}/{{pod}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "containerRestarts": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Container Restarts Over Time" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": { "position": "bottom" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\", pod=~\"$pod\"}[5m]) > 0",
+                  "seriesNameFormat": "{{namespace}}/{{pod}}/{{container}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "deploymentStatus": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Deployment Replica Status" },
+          "plugin": {
+            "kind": "Table",
+            "spec": {}
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "kube_deployment_status_replicas{namespace=~\"$namespace\"}",
+                  "seriesNameFormat": "Total - {{namespace}}/{{deployment}}"
+                }
+              }
+            }
+          }, {
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "PrometheusTimeSeriesQuery",
+                "spec": {
+                  "query": "kube_deployment_status_replicas_ready{namespace=~\"$namespace\"}",
+                  "seriesNameFormat": "Ready - {{namespace}}/{{deployment}}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "infoMarkdown": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Dashboard Info" },
+          "plugin": {
+            "kind": "Markdown",
+            "spec": {
+              "text": "## Kubernetes Cluster Monitoring\n\nThis dashboard combines **Prometheus** metrics and **Loki** logs for full-stack observability.\n\n**Datasources:**\n- `prometheus` — cluster, node, and workload metrics\n- `loki` — pod logs from Promtail\n\nUse the **namespace** and **pod** variables at the top to filter."
+            }
+          },
+          "queries": []
+        }
+      },
+
+      "lokiLogs": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Pod Logs" },
+          "plugin": {
+            "kind": "LogsTable",
+            "spec": {}
+          },
+          "queries": [{
+            "kind": "LogQuery",
+            "spec": {
+              "plugin": {
+                "kind": "LokiLogQuery",
+                "spec": {
+                  "query": "{namespace=~\"$namespace\", pod=~\"$pod\"}"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "lokiLogRate": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Log Rate by Namespace" },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "legend": { "position": "bottom" }
+            }
+          },
+          "queries": [{
+            "kind": "TimeSeriesQuery",
+            "spec": {
+              "plugin": {
+                "kind": "LokiTimeSeriesQuery",
+                "spec": {
+                  "query": "sum by (namespace) (rate({namespace=~\"$namespace\"}[5m]))"
+                }
+              }
+            }
+          }]
+        }
+      },
+
+      "lokiErrorLogs": {
+        "kind": "Panel",
+        "spec": {
+          "display": { "name": "Error Logs" },
+          "plugin": {
+            "kind": "LogsTable",
+            "spec": {}
+          },
+          "queries": [{
+            "kind": "LogQuery",
+            "spec": {
+              "plugin": {
+                "kind": "LokiLogQuery",
+                "spec": {
+                  "query": "{namespace=~\"$namespace\", pod=~\"$pod\"} |~ \"(?i)(error|fatal|panic|exception)\""
+                }
+              }
+            }
+          }]
+        }
+      }
+
+    },
+
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Info", "collapse": { "open": true } },
+          "items": [
+            { "x": 0,  "y": 0, "width": 24, "height": 4, "content": { "$ref": "#/spec/panels/infoMarkdown" } }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Cluster Overview", "collapse": { "open": true } },
+          "items": [
+            { "x": 0,  "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/nodeCount" } },
+            { "x": 4,  "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/podTotal" } },
+            { "x": 8,  "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/podRunning" } },
+            { "x": 12, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/podRestarts" } },
+            { "x": 16, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/clusterCpu" } },
+            { "x": 20, "y": 0, "width": 4, "height": 4, "content": { "$ref": "#/spec/panels/clusterMemory" } }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Node Resources", "collapse": { "open": true } },
+          "items": [
+            { "x": 0,  "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/cpuByNode" } },
+            { "x": 12, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/memoryByNode" } },
+            { "x": 0,  "y": 8, "width": 8,  "height": 8, "content": { "$ref": "#/spec/panels/networkTraffic" } },
+            { "x": 8,  "y": 8, "width": 8,  "height": 8, "content": { "$ref": "#/spec/panels/diskIO" } },
+            { "x": 16, "y": 8, "width": 8,  "height": 8, "content": { "$ref": "#/spec/panels/filesystemUsage" } }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Workloads", "collapse": { "open": true } },
+          "items": [
+            { "x": 0,  "y": 0, "width": 8,  "height": 6, "content": { "$ref": "#/spec/panels/podsByNamespace" } },
+            { "x": 8,  "y": 0, "width": 8,  "height": 6, "content": { "$ref": "#/spec/panels/podPhases" } },
+            { "x": 16, "y": 0, "width": 8,  "height": 6, "content": { "$ref": "#/spec/panels/containerRestarts" } },
+            { "x": 0,  "y": 6, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/topCpuPods" } },
+            { "x": 12, "y": 6, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/topMemoryPods" } },
+            { "x": 0,  "y": 14, "width": 24, "height": 6, "content": { "$ref": "#/spec/panels/deploymentStatus" } }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": { "title": "Logs (Loki)", "collapse": { "open": true } },
+          "items": [
+            { "x": 0,  "y": 0, "width": 24, "height": 6, "content": { "$ref": "#/spec/panels/lokiLogRate" } },
+            { "x": 0,  "y": 6, "width": 24, "height": 10, "content": { "$ref": "#/spec/panels/lokiLogs" } },
+            { "x": 0,  "y": 16, "width": 24, "height": 10, "content": { "$ref": "#/spec/panels/lokiErrorLogs" } }
+          ]
+        }
+      }
+    ]
+  }
+}
